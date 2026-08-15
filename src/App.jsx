@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Check, Download, Flag, LayoutDashboard, ListPlus, LoaderCircle, Menu, Pause, PhoneCall, Plus, SlidersHorizontal, Upload, Users } from 'lucide-react'
+import { ArrowLeft, Check, Download, Flag, LayoutDashboard, ListPlus, LoaderCircle, Menu, Pause, PhoneCall, Plus, RefreshCw, Rocket, SlidersHorizontal, Upload, Users } from 'lucide-react'
 import { rallyApi, subscribeToApiActivity } from './data/rallyApi'
 
 const navItems = [
   ['operations', 'Operations', LayoutDashboard], ['setup', 'Campaign setup', SlidersHorizontal], ['attendees', 'Attendees', Users], ['waitlist', 'Waitlist recovery', ListPlus], ['summary', 'Summary', Flag],
 ]
 const statusClass = (status) => status === 'Confirmed' || status === 'Campaign live' || status === 'Accepted' ? 'accent' : 'neutral'
+const adminTestCallsEnabled = import.meta.env.VITE_ENABLE_ADMIN_TEST_CALL_NOW === 'true'
+const displayStatus = (status) => String(status || 'DRAFT').toLowerCase().replace(/(^|_)([a-z])/g, (_match, prefix, letter) => `${prefix === '_' ? ' ' : ''}${letter.toUpperCase()}`)
+const formatTime = (value) => {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+}
+const scheduledWindow = () => {
+  // Sarvam enforces a 10-minute lead time when it receives the request. Keep a buffer for network and processing time.
+  const startAt = Date.now() + 15 * 60 * 1000
+  return { startTimestamp: new Date(startAt).toISOString(), endTimestamp: new Date(startAt + 4 * 60 * 60 * 1000).toISOString() }
+}
 
 function App() {
   const [campaigns, setCampaigns] = useState([])
@@ -52,17 +63,30 @@ function App() {
     setCampaign(updatedCampaign)
     setCampaigns((current) => current.map((item) => item.id === updatedCampaign.id ? updatedCampaign : item))
   }
+  const refreshCampaignDetails = async (selectedCampaign = campaign) => {
+    if (!selectedCampaign || selectedCampaign.isMock) return
+    try {
+      setError('')
+      setDetails(await rallyApi.getCampaignDetails(selectedCampaign.id))
+    } catch (loadError) { setError(loadError.message) }
+  }
+  useEffect(() => {
+    if (!campaign || campaign.isMock || view !== 'operations') return undefined
+    const refreshTimer = window.setInterval(() => { refreshCampaignDetails(campaign) }, 15000)
+    return () => window.clearInterval(refreshTimer)
+  }, [campaign?.id, view])
   if (loading) return <PageLoader requests={pendingRequests} />
 
-  return <div className="app-shell">
-    <button className="menu-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation"><Menu size={20} /></button>
-    <Sidebar campaign={campaign} view={view} onNavigate={setView} onHome={() => setView('campaigns')} open={mobileNav} />
+  return <div className={`app-shell ${mobileNav ? 'mobile-nav-open' : ''}`}>
+    <button className="menu-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation" aria-expanded={mobileNav}><Menu size={20} /></button>
+    {mobileNav && <button className="mobile-scrim" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
+    <Sidebar campaign={campaign} view={view} onNavigate={(nextView) => { setView(nextView); setMobileNav(false) }} onHome={() => { setView('campaigns'); setMobileNav(false) }} open={mobileNav} />
     <main className="main-content">
       <ApiActivity requests={pendingRequests} />
       {error && <div className="error-banner">{error}</div>}
       {view === 'campaigns' && <Campaigns campaigns={campaigns} onChoose={chooseCampaign} onNew={openNew} />}
       {view === 'new' && <NewCampaign onBack={() => setView('campaigns')} onCreated={handleCreated} />}
-      {campaign && details && view === 'operations' && <Operations campaign={campaign} details={details} onCampaignUpdated={handleCampaignUpdated} />}
+      {campaign && details && view === 'operations' && <Operations campaign={campaign} details={details} onCampaignUpdated={handleCampaignUpdated} onRefresh={refreshCampaignDetails} />}
       {campaign && !details && view === 'operations' && <DetailsLoader campaign={campaign} requests={pendingRequests} />}
       {campaign && view === 'setup' && <Setup />}
       {campaign && view === 'attendees' && <Attendees people={details?.attendees ?? []} selected={selectedPerson} onSelect={setSelectedPerson} />}
@@ -118,8 +142,8 @@ function NewCampaign({ onBack, onCreated }) {
   const launch = async () => {
     try {
       if (!createdCampaign || !imported) throw new Error('Create the campaign and import attendees before launching.')
-      setBusy(true); setError(''); const startAt = Date.now() + 10 * 60 * 1000; const start = new Date(startAt).toISOString(); const end = new Date(startAt + 4 * 60 * 60 * 1000).toISOString()
-      await rallyApi.launchCampaign(createdCampaign.id, start, end)
+      setBusy(true); setError(''); const { startTimestamp, endTimestamp } = scheduledWindow()
+      await rallyApi.launchCampaign(createdCampaign.id, startTimestamp, endTimestamp)
       setMessage('Campaign is live. Sarvam is now scheduling calls.')
       await onCreated({ ...createdCampaign, state: 'ACTIVE', status: 'Active' })
     } catch (launchError) { setError(launchError.message) } finally { setBusy(false) }
@@ -130,7 +154,7 @@ function NewCampaign({ onBack, onCreated }) {
   <FormSection n="03" title="Launch calls"><div className="chips">{['Attendance', 'Arrival time', 'Parking', 'Food preference'].map((x) => <Tag key={x} type="accent">{x}</Tag>)}</div><div className="button-row"><Button onClick={launch} disabled={busy || !createdCampaign || !imported}>Launch campaign</Button></div></FormSection>{message && <div className="notice">{message}</div>}{error && <div className="error-banner">{error}</div>}</div><aside className="consent-card"><small>Consent</small><p>Rally uploads only opted-in attendees for calling. During the demo, the backend can safely route calls to the configured demo recipient.</p></aside></div></section>
 }
 
-function Operations({ campaign, details, onCampaignUpdated }) {
+function Operations({ campaign, details, onCampaignUpdated, onRefresh }) {
   const [busyAction, setBusyAction] = useState(false)
   const [notice, setNotice] = useState('')
   const [actionError, setActionError] = useState('')
@@ -156,10 +180,33 @@ function Operations({ campaign, details, onCampaignUpdated }) {
       const result = await rallyApi.callNow(campaign.id)
       const attemptId = result.sarvamOutbound?.attempt_id || result.sarvamOutbound?.id || result.sarvamOutbound?.outbound_id
       setNotice(`Immediate call requested for ${result.attendee.name}.${attemptId ? ` Sarvam attempt: ${attemptId}` : ''}`)
+      await onRefresh()
     } catch (error) { setActionError(error.message) } finally { setBusyAction(false) }
   }
-  return <section><Header kicker={campaign.isMock ? 'Operations · mock data' : 'Operations'} title={campaign.name} description={`${campaign.venue} · ${campaign.isMock ? 'Hardcoded sample data for UI testing' : 'Results update automatically after each Sarvam call'}`} action={<div className="button-row"><Button variant="secondary" icon={Pause} onClick={updateStatus} disabled={busyAction || campaign.isMock}>{paused ? 'Resume campaign' : 'Pause campaign'}</Button><Button icon={PhoneCall} onClick={callNow} disabled={busyAction || campaign.isMock}>Call now</Button></div>} /><div className="headline-stats"><Stat number={confirmed} label="confirmed" /><Stat number={uncertain} label="uncertain" /><Stat number={declined} label="declined" /><Stat number={uncontacted} label="uncontacted" /></div><Progress values={[confirmed, uncertain, declined, uncontacted]} />
-  {notice && <div className="notice">{notice}</div>}{actionError && <div className="error-banner">{actionError}</div>}<div className="dashboard-grid"><div><div className="insight-grid">{details.groups.map(g => <div className="insight-card" key={g.title}><small>{g.title}</small>{g.rows.map(([k,v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>)}</div><h3 className="section-title">Action queue</h3><table><thead><tr><th>Task</th><th>Attendee</th><th>Owner</th><th>Status</th></tr></thead><tbody>{details.tasks.map(t => <tr key={t[0]}>{t.map((x,i) => <td key={x}>{i === 3 ? <Tag type="neutral">{x}</Tag> : x}</td>)}</tr>)}</tbody></table></div><aside><div className="batch-card"><small>Batch progress</small><b>{completed} calls completed · {uncontacted} queued</b><Progress values={[completed, uncontacted]} /><p>{details.activity.length} activity events · results arrive after every Sarvam callback</p></div><h3 className="section-title">Live activity</h3><div className="activity">{details.activity.map(([time, text]) => <div key={time}><time>{time}</time><span>{text}</span></div>)}</div></aside></div></section>
+  const launch = async () => {
+    try {
+      setBusyAction(true); setActionError(''); setNotice('')
+      const { startTimestamp, endTimestamp } = scheduledWindow()
+      const result = await rallyApi.launchCampaign(campaign.id, startTimestamp, endTimestamp)
+      if (result.campaign) onCampaignUpdated(result.campaign)
+      setNotice('Sarvam cohort uploaded. Calling will begin in about 15 minutes within the allowed schedule.')
+      await onRefresh()
+    } catch (error) { setActionError(error.message) } finally { setBusyAction(false) }
+  }
+  return <section><Header kicker={campaign.isMock ? 'Operations · mock data' : 'Operations'} title={campaign.name} description={`${campaign.venue} · ${campaign.isMock ? 'Hardcoded sample data for UI testing' : 'Results update automatically after each Sarvam call'}`} action={<div className="button-row"><Button variant="secondary" icon={RefreshCw} onClick={onRefresh} disabled={busyAction || campaign.isMock}>Refresh status</Button>{!details.execution?.hasSarvamSchedule && <Button variant="secondary" icon={Rocket} onClick={launch} disabled={busyAction || campaign.isMock}>Launch schedule</Button>}<Button variant="secondary" icon={Pause} onClick={updateStatus} disabled={busyAction || campaign.isMock}>{paused ? 'Resume campaign' : 'Pause campaign'}</Button>{adminTestCallsEnabled && <Button icon={PhoneCall} onClick={callNow} disabled={busyAction || campaign.isMock}>Call now</Button>}</div>} /><div className="headline-stats"><Stat number={confirmed} label="confirmed" /><Stat number={uncertain} label="uncertain" /><Stat number={declined} label="declined" /><Stat number={uncontacted} label="uncontacted" /></div><Progress values={[confirmed, uncertain, declined, uncontacted]} />
+  <ExecutionStatus execution={details.execution} /><>{notice && <div className="notice">{notice}</div>}{actionError && <div className="error-banner">{actionError}</div>}</><SarvamResults results={details.responses} /><div className="dashboard-grid"><div><div className="insight-grid">{details.groups.map(g => <div className="insight-card" key={g.title}><small>{g.title}</small>{g.rows.map(([k,v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>)}</div><h3 className="section-title">Action queue</h3><table><thead><tr><th>Task</th><th>Attendee</th><th>Owner</th><th>Status</th></tr></thead><tbody>{details.tasks.map(t => <tr key={t[0]}>{t.map((x,i) => <td key={x}>{i === 3 ? <Tag type="neutral">{x}</Tag> : x}</td>)}</tr>)}</tbody></table></div><aside><div className="batch-card"><small>Batch progress</small><b>{completed} calls completed · {uncontacted} queued</b><Progress values={[completed, uncontacted]} /><p>{details.activity.length} activity events · results arrive after every Sarvam callback</p></div><h3 className="section-title">Live activity</h3><div className="activity">{details.activity.map(([time, text]) => <div key={time}><time>{time}</time><span>{text}</span></div>)}</div></aside></div></section>
+}
+
+function SarvamResults({ results = [] }) {
+  return <section className="sarvam-results"><div className="sarvam-results-heading"><div><small>Latest Sarvam results</small><h2>What attendees said on completed calls</h2></div><span>Refreshes every 15 seconds</span></div>{!results.length ? <p className="sarvam-results-empty">No completed-call result has reached Rally yet. “Call Triggered” only confirms the dial request; this section fills after Sarvam posts to the results endpoint.</p> : <div className="sarvam-result-list">{results.slice(0, 5).map((result) => <article className="sarvam-result" key={result.id}><div className="sarvam-result-top"><div><b>{result.attendeeName}</b><span>{formatTime(result.createdAt)}</span></div><Tag type={statusClass(result.outcome)}>{displayStatus(result.outcome)}</Tag></div><p>{result.callSummary || 'No summary supplied.'}</p><div className="sarvam-result-fields">{result.transportMode && <span>Transport: <b>{result.transportMode}</b></span>}{result.arrivalSlot && <span>Arrival: <b>{result.arrivalSlot}</b></span>}{result.foodPreference && <span>Food: <b>{result.foodPreference}</b></span>}{result.escalationFlag && <span className="result-escalation">Needs organiser follow-up</span>}</div></article>)}</div>}</section>
+}
+
+function ExecutionStatus({ execution }) {
+  if (!execution) return null
+  const { attendees, schedulerState, hasSarvamSchedule, demoRecipientEnabled, callsRequested, callResultsReceived, latestActivity } = execution
+  const stateCopy = schedulerState === 'scheduled' ? 'Sarvam has a bulk-call schedule.' : schedulerState === 'paused' ? 'Sarvam calling is paused.' : schedulerState === 'paused_before_launch' ? 'Paused before launch — Sarvam has not received this campaign.' : 'Bulk calls have not started — launch is still required.'
+  const nextStep = !hasSarvamSchedule ? 'Use Launch schedule to create the Sarvam schedule. A locally active campaign alone cannot place calls.' : schedulerState === 'paused' ? 'Resume the campaign to let Sarvam dial again.' : callsRequested === 0 ? 'Sarvam is scheduled. Calls appear here after Sarvam sends activity or a result back to Rally.' : 'Calls have been requested. Results appear once Sarvam posts the completed-call webhook.'
+  return <section className={`execution-status ${hasSarvamSchedule ? 'is-scheduled' : 'needs-launch'}`}><div className="execution-heading"><div><small>Call delivery status</small><h2>{stateCopy}</h2></div><Tag type={hasSarvamSchedule ? 'accent' : 'neutral'}>{schedulerState.replaceAll('_', ' ')}</Tag></div><p>{nextStep}</p><div className="execution-grid"><Stat number={`${attendees.eligible}/${attendees.total}`} label="eligible to call" /><Stat number={callsRequested} label="calls requested" /><Stat number={callResultsReceived} label="results received" /><Stat number={attendees.notOptedIn + attendees.waitlistedOrReleased + attendees.missingPhone} label="excluded attendees" /></div><div className="execution-notes"><span>{attendees.notOptedIn} not opted in</span><span>{attendees.waitlistedOrReleased} waitlisted/released</span>{!demoRecipientEnabled && <span>{attendees.missingPhone} missing phone</span>}{demoRecipientEnabled && <span>Demo routing is on: eligible calls go to the configured demo phone, not attendee phone columns.</span>}</div>{latestActivity && <div className="execution-latest">Latest Rally event: <b>{displayStatus(latestActivity.eventType)}</b>{latestActivity.attendeeName ? ` · ${latestActivity.attendeeName}` : ''} · {formatTime(latestActivity.occurredAt)}</div>}</section>
 }
 
 function Setup() { return <section><Header kicker="Campaign setup" title="Questions and safeguards" description="Adjust the call flow and rules without changing approved consent language." /><div className="setup-grid"><div><h3 className="section-title">Call questions</h3>{['Attendance confirmation', 'Expected arrival time', 'Parking requirement', 'Food preference', 'Team status', 'Accessibility request'].map((q,i) => <label className="question" key={q}><span><b>{q}</b><small>{i < 4 ? 'Required' : 'Optional'}</small></span><input type="checkbox" defaultChecked={i < 4} /></label>)}</div><div className="rule-card"><small>Campaign rules</small>{[['Campaign deadline','Fri 13 Feb, 21:00'],['Call attempts','3, spaced 90 min'],['Escalation owner','Meera K'],['Private fields','Dietary, accessibility'],['Opt-out','Offered in every call']].map(([k,v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div></div></section> }

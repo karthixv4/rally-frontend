@@ -24,6 +24,7 @@ function requestLabel(path, method) {
   if (path.includes('/sarvam/launch')) return 'Launching call campaign'
   if (path.includes('/sarvam/call-now')) return 'Requesting immediate call'
   if (path.includes('/sarvam/status')) return 'Updating campaign status'
+  if (path.includes('/sarvam/execution-status')) return 'Checking call delivery status'
   if (path.endsWith('/attendees')) return 'Loading attendees'
   if (path.endsWith('/preferences-summary')) return 'Loading preference summary'
   if (path.endsWith('/tasks')) return 'Loading action queue'
@@ -70,6 +71,9 @@ const MOCK_DASHBOARD = {
     ['13:48', 'Rahul Iyer confirmed and requested a parking spot.'],
     ['13:31', 'Aniket Bose declined and approved a seat release.'],
   ],
+  responses: [
+    { id: 'mock-response-kavya', attendeeName: 'Kavya Shah', outcome: 'CONFIRMED', transportMode: 'Metro', arrivalSlot: '18:30', foodPreference: 'Vegetarian', escalationFlag: true, callSummary: 'Kavya confirmed attendance and asked for the step-free entrance route.', createdAt: new Date().toISOString() },
+  ],
   attendees: [
     { id: 'mock-kavya', name: 'Kavya Shah', meta: 'Phone contact consented', phone: '+91 98765 11220', status: 'Confirmed', readiness: 'Accessibility route needs organiser confirmation', when: '14:04', answers: [['Attendance', 'Confirmed'], ['Arrival', '18:30'], ['Parking', 'Not required'], ['Food', 'Vegetarian'], ['Accessibility', 'Step-free route']] },
     { id: 'mock-rahul', name: 'Rahul Iyer', meta: 'Phone contact consented', phone: '+91 98111 45320', status: 'Confirmed', readiness: 'Parking spot requested', when: '13:48', answers: [['Attendance', 'Confirmed'], ['Arrival', '19:00'], ['Parking', 'Required'], ['Food', 'Vegan'], ['Accessibility', 'Not provided']] },
@@ -81,6 +85,7 @@ const MOCK_DASHBOARD = {
     ['2', 'Varun Rao', 'Phone contact consented', 'Queued', 'On release'],
     ['3', 'Ishita Singh', 'Phone contact consented', 'Queued', 'On release'],
   ],
+  execution: { schedulerState: 'scheduled', hasSarvamSchedule: true, demoRecipientEnabled: false, attendees: { total: 60, eligible: 49, notOptedIn: 6, waitlistedOrReleased: 5, missingPhone: 0 }, callsRequested: 49, callResultsReceived: 38, latestActivity: { eventType: 'call_completed', occurredAt: new Date().toISOString(), attendeeName: 'Nisha Patel' } },
 }
 
 const sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
@@ -159,8 +164,19 @@ function normalizeAttendee(attendee) {
   }
 }
 
-function composeDashboard({ attendees, preferences, tasks, waitlist, activity }) {
+function composeDashboard({ attendees, preferences, tasks, waitlist, activity, execution }) {
   const normalizedAttendees = attendees.map(normalizeAttendee)
+  const responses = attendees.flatMap((attendee) => (attendee.responses ?? []).map((response) => ({
+    id: response.id,
+    attendeeName: attendee.name,
+    outcome: response.outcome,
+    transportMode: response.transportMode,
+    arrivalSlot: response.arrivalSlot,
+    foodPreference: response.foodPreference,
+    escalationFlag: response.escalationFlag,
+    callSummary: response.callSummary,
+    createdAt: response.createdAt,
+  }))).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
   const offersByAttendee = new Map((waitlist.offers ?? []).map((offer) => [offer.attendeeId, offer]))
   return {
     groups: [
@@ -171,10 +187,12 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity })
     tasks: tasks.map((task) => [task.summary, task.attendee?.name ?? '—', task.owner ?? 'Unassigned', displayStatus(task.status)]),
     activity: activity.map((item) => [formatTime(item.occurredAt), item.transcript ?? item.details?.callSummary ?? `${item.attendee?.name ?? 'Attendee'} · ${displayStatus(item.eventType)}`]),
     attendees: normalizedAttendees,
+    responses,
     waitlist: (waitlist.waitlist ?? []).map((attendee) => {
       const offer = offersByAttendee.get(attendee.id)
       return [String(attendee.waitlistRank ?? '—'), attendee.name, attendee.optedIn ? 'Phone contact consented' : 'No phone consent', displayStatus(offer?.status ?? attendee.status), offer?.expiresAt ? formatTime(offer.expiresAt) : 'On release']
     }),
+    execution,
   }
 }
 
@@ -213,9 +231,10 @@ export const rallyApi = {
         finish()
       }
     }
-    const [attendeesPayload, preferences, tasksPayload, waitlist, activityPayload] = await Promise.all([
+    const [attendeesPayload, preferences, tasksPayload, waitlist, activityPayload, executionPayload] = await Promise.all([
       request(`/campaigns/${campaignId}/attendees`), request(`/campaigns/${campaignId}/preferences-summary`), request(`/campaigns/${campaignId}/tasks`), request(`/campaigns/${campaignId}/waitlist`), request(`/campaigns/${campaignId}/activity`),
+      request(`/campaigns/${campaignId}/sarvam/execution-status`),
     ])
-    return composeDashboard({ attendees: attendeesPayload.attendees ?? [], preferences, tasks: tasksPayload.tasks ?? [], waitlist, activity: activityPayload.activity ?? [] })
+    return composeDashboard({ attendees: attendeesPayload.attendees ?? [], preferences, tasks: tasksPayload.tasks ?? [], waitlist, activity: activityPayload.activity ?? [], execution: executionPayload.execution })
   },
 }
