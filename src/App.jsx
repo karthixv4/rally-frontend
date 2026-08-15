@@ -154,7 +154,8 @@ function Operations({ campaign, details, onCampaignUpdated }) {
     try {
       setBusyAction(true); setActionError(''); setNotice('')
       const result = await rallyApi.callNow(campaign.id)
-      setNotice(`Immediate call requested for ${result.attendee.name}.`)
+      const attemptId = result.sarvamOutbound?.attempt_id || result.sarvamOutbound?.id || result.sarvamOutbound?.outbound_id
+      setNotice(`Immediate call requested for ${result.attendee.name}.${attemptId ? ` Sarvam attempt: ${attemptId}` : ''}`)
     } catch (error) { setActionError(error.message) } finally { setBusyAction(false) }
   }
   return <section><Header kicker={campaign.isMock ? 'Operations · mock data' : 'Operations'} title={campaign.name} description={`${campaign.venue} · ${campaign.isMock ? 'Hardcoded sample data for UI testing' : 'Results update automatically after each Sarvam call'}`} action={<div className="button-row"><Button variant="secondary" icon={Pause} onClick={updateStatus} disabled={busyAction || campaign.isMock}>{paused ? 'Resume campaign' : 'Pause campaign'}</Button><Button icon={PhoneCall} onClick={callNow} disabled={busyAction || campaign.isMock}>Call now</Button></div>} /><div className="headline-stats"><Stat number={confirmed} label="confirmed" /><Stat number={uncertain} label="uncertain" /><Stat number={declined} label="declined" /><Stat number={uncontacted} label="uncontacted" /></div><Progress values={[confirmed, uncertain, declined, uncontacted]} />
