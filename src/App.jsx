@@ -145,8 +145,9 @@ function Operations({ campaign, details, onCampaignUpdated }) {
   const updateStatus = async () => {
     try {
       setBusyAction(true); setActionError(''); setNotice('')
-      onCampaignUpdated(await rallyApi.updateCampaignStatus(campaign.id, paused ? 'resume' : 'pause'))
-      setNotice(paused ? 'Campaign resumed in Sarvam.' : 'Campaign paused in Sarvam.')
+      const result = await rallyApi.updateCampaignStatus(campaign.id, paused ? 'resume' : 'pause')
+      onCampaignUpdated(result.campaign)
+      setNotice(result.message)
     } catch (error) { setActionError(error.message) } finally { setBusyAction(false) }
   }
   const callNow = async () => {

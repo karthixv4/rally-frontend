@@ -200,7 +200,7 @@ export const rallyApi = {
   launchCampaign: async (campaignId, startTimestamp, endTimestamp) => request(`/campaigns/${campaignId}/sarvam/launch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startTimestamp, endTimestamp }) }),
   updateCampaignStatus: async (campaignId, action) => {
     const payload = await request(`/campaigns/${campaignId}/sarvam/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
-    return normalizeCampaign(payload.campaign)
+    return { campaign: normalizeCampaign(payload.campaign), message: payload.message }
   },
   callNow: (campaignId, attendeeId) => request(`/campaigns/${campaignId}/sarvam/call-now`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(attendeeId ? { attendeeId } : {}) }),
   getCampaignDetails: async (campaignId) => {
