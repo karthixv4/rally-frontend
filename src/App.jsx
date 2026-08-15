@@ -114,7 +114,7 @@ function NewCampaign({ onBack, onCreated }) {
   const launch = async () => {
     try {
       if (!createdCampaign || !imported) throw new Error('Create the campaign and import attendees before launching.')
-      setBusy(true); setError(''); const start = new Date().toISOString(); const end = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+      setBusy(true); setError(''); const startAt = Date.now() + 10 * 60 * 1000; const start = new Date(startAt).toISOString(); const end = new Date(startAt + 4 * 60 * 60 * 1000).toISOString()
       await rallyApi.launchCampaign(createdCampaign.id, start, end)
       setMessage('Campaign is live. Sarvam is now scheduling calls.')
       await onCreated({ ...createdCampaign, state: 'ACTIVE', status: 'Active' })
