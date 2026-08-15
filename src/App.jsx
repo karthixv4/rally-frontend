@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Check, Download, Flag, LayoutDashboard, ListPlus, Menu, Pause, Plus, SlidersHorizontal, Upload, Users } from 'lucide-react'
-import { rallyApi } from './data/rallyApi'
+import { ArrowLeft, Check, Download, Flag, LayoutDashboard, ListPlus, LoaderCircle, Menu, Pause, Plus, SlidersHorizontal, Upload, Users } from 'lucide-react'
+import { rallyApi, subscribeToApiActivity } from './data/rallyApi'
 
 const navItems = [
   ['operations', 'Operations', LayoutDashboard], ['setup', 'Campaign setup', SlidersHorizontal], ['attendees', 'Attendees', Users], ['waitlist', 'Waitlist recovery', ListPlus], ['summary', 'Summary', Flag],
@@ -16,7 +16,9 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [pendingRequests, setPendingRequests] = useState([])
 
+  useEffect(() => subscribeToApiActivity(setPendingRequests), [])
   useEffect(() => {
     let active = true
     rallyApi.getCampaigns().then((items) => {
@@ -46,16 +48,18 @@ function App() {
     setCampaigns((current) => [createdCampaign, ...current])
     await chooseCampaign(createdCampaign)
   }
-  if (loading) return <div className="loading">Loading Rally…</div>
+  if (loading) return <PageLoader requests={pendingRequests} />
 
   return <div className="app-shell">
     <button className="menu-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation"><Menu size={20} /></button>
     <Sidebar campaign={campaign} view={view} onNavigate={setView} onHome={() => setView('campaigns')} open={mobileNav} />
     <main className="main-content">
+      <ApiActivity requests={pendingRequests} />
       {error && <div className="error-banner">{error}</div>}
       {view === 'campaigns' && <Campaigns campaigns={campaigns} onChoose={chooseCampaign} onNew={openNew} />}
       {view === 'new' && <NewCampaign onBack={() => setView('campaigns')} onCreated={handleCreated} />}
       {campaign && details && view === 'operations' && <Operations campaign={campaign} details={details} />}
+      {campaign && !details && view === 'operations' && <DetailsLoader campaign={campaign} requests={pendingRequests} />}
       {campaign && view === 'setup' && <Setup />}
       {campaign && view === 'attendees' && <Attendees people={details?.attendees ?? []} selected={selectedPerson} onSelect={setSelectedPerson} />}
       {campaign && view === 'waitlist' && <Waitlist rows={details?.waitlist ?? []} />}
@@ -72,7 +76,7 @@ function Sidebar({ campaign, view, onNavigate, onHome, open }) { return <aside c
 </aside> }
 
 function Campaigns({ campaigns, onChoose, onNew }) { return <section><Header kicker="Campaigns" title="Your event readiness campaigns" description="Create a campaign, import opted-in attendees, and launch calls from one place." action={<Button icon={Plus} onClick={onNew}>New campaign</Button>} />
-  <div className="campaign-grid">{campaigns.map(c => <button className="campaign-card" key={c.id} onClick={() => onChoose(c)}><div className="card-top"><div><h2>{c.name}</h2><p>{c.meta}</p></div><Tag type={statusClass(c.status)}>{c.status}</Tag></div><div className="mini-stats"><Stat number={c.confirmed} label="confirmed" /><Stat number={c.uncertain} label="uncertain" /><Stat number={c.uncontacted} label="to call" /></div><Progress values={[c.confirmed, c.uncertain, c.uncontacted]} /></button>)}
+  <div className="mock-data-note"><strong>Mock data is available:</strong> open the labelled sample campaign to explore Rally without creating real event data.</div><div className="campaign-grid">{campaigns.map(c => <button className="campaign-card" key={c.id} onClick={() => onChoose(c)}><div className="card-top"><div><h2>{c.name}</h2><p>{c.meta}</p></div><div className="card-tags">{c.isMock && <Tag type="mock">Mock data</Tag>}<Tag type={statusClass(c.status)}>{c.status}</Tag></div></div><div className="mini-stats"><Stat number={c.confirmed} label="confirmed" /><Stat number={c.uncertain} label="uncertain" /><Stat number={c.uncontacted} label="to call" /></div><Progress values={[c.confirmed, c.uncertain, c.uncontacted]} /></button>)}
   <button className="new-card" onClick={onNew}><Plus size={20} /><strong>New campaign</strong><span>Import a list, pick questions, launch.</span></button></div></section> }
 
 function NewCampaign({ onBack, onCreated }) {
@@ -122,7 +126,7 @@ function NewCampaign({ onBack, onCreated }) {
   <FormSection n="03" title="Launch calls"><div className="chips">{['Attendance', 'Arrival time', 'Parking', 'Food preference'].map((x) => <Tag key={x} type="accent">{x}</Tag>)}</div><div className="button-row"><Button onClick={launch} disabled={busy || !createdCampaign || !imported}>Launch campaign</Button></div></FormSection>{message && <div className="notice">{message}</div>}{error && <div className="error-banner">{error}</div>}</div><aside className="consent-card"><small>Consent</small><p>Rally uploads only opted-in attendees for calling. During the demo, the backend can safely route calls to the configured demo recipient.</p></aside></div></section>
 }
 
-function Operations({ campaign, details }) { const counts = details.attendees.reduce((result, attendee) => ({ ...result, [attendee.status.toLowerCase()]: (result[attendee.status.toLowerCase()] ?? 0) + 1 }), {}); const completed = (counts.confirmed ?? 0) + (counts.uncertain ?? 0) + (counts.declined ?? 0) + (counts.released ?? 0); const uncontacted = Math.max(0, details.attendees.length - completed); return <section><Header kicker="Operations" title={campaign.name} description={`${campaign.venue} · Results update automatically after each Sarvam call`} action={<div className="button-row"><Button variant="secondary" icon={Pause}>Pause campaign</Button><Button icon={Download}>Export plan</Button></div>} /><div className="headline-stats"><Stat number={counts.confirmed ?? 0} label="confirmed" /><Stat number={counts.uncertain ?? 0} label="uncertain" /><Stat number={counts.declined ?? 0} label="declined" /><Stat number={uncontacted} label="uncontacted" /></div><Progress values={[counts.confirmed ?? 0, counts.uncertain ?? 0, counts.declined ?? 0, uncontacted]} />
+function Operations({ campaign, details }) { const counts = details.attendees.reduce((result, attendee) => ({ ...result, [attendee.status.toLowerCase()]: (result[attendee.status.toLowerCase()] ?? 0) + 1 }), {}); const attendeeCompleted = (counts.confirmed ?? 0) + (counts.uncertain ?? 0) + (counts.declined ?? 0) + (counts.released ?? 0); const uncontacted = Math.max(0, campaign.isMock ? campaign.uncontacted : details.attendees.length - attendeeCompleted); const confirmed = campaign.isMock ? campaign.confirmed : counts.confirmed ?? 0; const uncertain = campaign.isMock ? campaign.uncertain : counts.uncertain ?? 0; const declined = campaign.isMock ? campaign.declined : counts.declined ?? 0; const completed = campaign.isMock ? confirmed + uncertain + declined : attendeeCompleted; return <section><Header kicker={campaign.isMock ? 'Operations · mock data' : 'Operations'} title={campaign.name} description={`${campaign.venue} · ${campaign.isMock ? 'Hardcoded sample data for UI testing' : 'Results update automatically after each Sarvam call'}`} action={<div className="button-row"><Button variant="secondary" icon={Pause}>Pause campaign</Button><Button icon={Download}>Export plan</Button></div>} /><div className="headline-stats"><Stat number={confirmed} label="confirmed" /><Stat number={uncertain} label="uncertain" /><Stat number={declined} label="declined" /><Stat number={uncontacted} label="uncontacted" /></div><Progress values={[confirmed, uncertain, declined, uncontacted]} />
   <div className="dashboard-grid"><div><div className="insight-grid">{details.groups.map(g => <div className="insight-card" key={g.title}><small>{g.title}</small>{g.rows.map(([k,v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>)}</div><h3 className="section-title">Action queue</h3><table><thead><tr><th>Task</th><th>Attendee</th><th>Owner</th><th>Status</th></tr></thead><tbody>{details.tasks.map(t => <tr key={t[0]}>{t.map((x,i) => <td key={x}>{i === 3 ? <Tag type="neutral">{x}</Tag> : x}</td>)}</tr>)}</tbody></table></div><aside><div className="batch-card"><small>Batch progress</small><b>{completed} calls completed · {uncontacted} queued</b><Progress values={[completed, uncontacted]} /><p>{details.activity.length} activity events · results arrive after every Sarvam callback</p></div><h3 className="section-title">Live activity</h3><div className="activity">{details.activity.map(([time, text]) => <div key={time}><time>{time}</time><span>{text}</span></div>)}</div></aside></div></section> }
 
 function Setup() { return <section><Header kicker="Campaign setup" title="Questions and safeguards" description="Adjust the call flow and rules without changing approved consent language." /><div className="setup-grid"><div><h3 className="section-title">Call questions</h3>{['Attendance confirmation', 'Expected arrival time', 'Parking requirement', 'Food preference', 'Team status', 'Accessibility request'].map((q,i) => <label className="question" key={q}><span><b>{q}</b><small>{i < 4 ? 'Required' : 'Optional'}</small></span><input type="checkbox" defaultChecked={i < 4} /></label>)}</div><div className="rule-card"><small>Campaign rules</small>{[['Campaign deadline','Fri 13 Feb, 21:00'],['Call attempts','3, spaced 90 min'],['Escalation owner','Meera K'],['Private fields','Dietary, accessibility'],['Opt-out','Offered in every call']].map(([k,v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div></div></section> }
@@ -134,6 +138,9 @@ function Waitlist({ rows }) { return <section><Header kicker="Waitlist recovery"
 function Summary({ details }) { const outcomes = [['Responses', String(details.attendees.length), 'captured by Rally'], ['Follow-ups', String(details.tasks.length), 'in the action queue'], ['Activity events', String(details.activity.length), 'visible to organisers'], ['Waitlist', String(details.waitlist.length), 'eligible attendees']]; return <section><Header kicker="Summary" title="Campaign outcome" description="A live record built from Sarvam call results and Rally operations data." /><div className="outcomes">{outcomes.map(o => <div key={o[0]}><b>{o[1]}</b><span>{o[0]}</span><small>{o[2]}</small></div>)}</div><div className="summary-list">{details.activity.length ? details.activity.slice(0, 4).map(([time, text]) => <div key={`${time}-${text}`}><Check size={17}/>{time} · {text}</div>) : <div><Check size={17}/>No calls have completed yet. Launch the campaign to start the Sarvam call run.</div>}</div></section> }
 
 function Header({ kicker, title, description, action }) { return <header className="page-header"><div><small>{kicker}</small><h1>{title}</h1><p>{description}</p></div>{action}</header> }
+function PageLoader({ requests }) { return <div className="loading"><LoaderCircle className="spinner" size={28} /><strong>Connecting to Rally</strong><span>{requests[0]?.label ?? 'Loading campaign data…'}</span></div> }
+function DetailsLoader({ campaign, requests }) { return <section className="details-loader"><LoaderCircle className="spinner" size={30} /><h2>Loading {campaign.name}</h2><p>{requests.length ? requests.map((request) => request.label).join(' · ') : 'Preparing campaign operations…'}</p></section> }
+function ApiActivity({ requests }) { if (!requests.length) return null; return <aside className="api-activity" aria-live="polite"><div><LoaderCircle className="spinner" size={16} /><strong>Loading live data</strong></div>{requests.map((request) => <span key={request.id}>{request.label}</span>)}</aside> }
 function Button({ children, icon: Icon, variant = 'primary', ...props }) { return <button className={`button ${variant}`} {...props}>{Icon && <Icon size={15} />}{children}</button> }
 function Tag({ children, type = 'neutral' }) { return <span className={`tag ${type}`}>{children}</span> }
 function Stat({ number, label }) { return <div className="stat"><b>{number}</b><span>{label}</span></div> }
