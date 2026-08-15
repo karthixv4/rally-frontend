@@ -2,3 +2,8 @@ node_modules/
 dist/
 .env
 .env.local
+ppt-build/
+Rally_Hackathon_Review/
+*.pptx.inspect.ndjson
+~$*.pptx
+Rally_Hackathon_Review.pptx
