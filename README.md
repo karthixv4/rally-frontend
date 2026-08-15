@@ -4,6 +4,10 @@
 
 ![Rally operations dashboard](public/rally-dashboard.png)
 
+## Hackathon review deck
+
+📊 **[Download the Rally hackathon review deck](docs/Rally_Hackathon_Review.pptx)** — a concise walkthrough of the problem, product flow, built capabilities, and backend integration.
+
 ## Why Rally
 
 Event organisers rarely have a reliable view of who will actually attend, when they will arrive, or what support they need. Rally gathers those readiness signals, surfaces follow-ups, and helps teams recover seats when attendees decline.
