@@ -22,6 +22,8 @@ function requestLabel(path, method) {
   if (method === 'POST' && path === '/campaigns') return 'Creating campaign'
   if (path.includes('import-excel')) return 'Importing attendee workbook'
   if (path.includes('/sarvam/launch')) return 'Launching call campaign'
+  if (path.includes('/sarvam/call-now')) return 'Requesting immediate call'
+  if (path.includes('/sarvam/status')) return 'Updating campaign status'
   if (path.endsWith('/attendees')) return 'Loading attendees'
   if (path.endsWith('/preferences-summary')) return 'Loading preference summary'
   if (path.endsWith('/tasks')) return 'Loading action queue'
@@ -196,6 +198,11 @@ export const rallyApi = {
     return request(`/campaigns/${campaignId}/attendees/import-excel`, { method: 'POST', body: form })
   },
   launchCampaign: async (campaignId, startTimestamp, endTimestamp) => request(`/campaigns/${campaignId}/sarvam/launch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startTimestamp, endTimestamp }) }),
+  updateCampaignStatus: async (campaignId, action) => {
+    const payload = await request(`/campaigns/${campaignId}/sarvam/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
+    return normalizeCampaign(payload.campaign)
+  },
+  callNow: (campaignId, attendeeId) => request(`/campaigns/${campaignId}/sarvam/call-now`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(attendeeId ? { attendeeId } : {}) }),
   getCampaignDetails: async (campaignId) => {
     if (campaignId === MOCK_CAMPAIGN.id) {
       const finish = startRequest('Loading explicit mock campaign data', 'mock://campaign-details')
