@@ -2,6 +2,13 @@ const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api')
 
 const apiListeners = new Set()
 const pendingRequests = new Map()
+const tokenKey = 'rally_access_token'
+
+export const authStore = {
+  getToken: () => localStorage.getItem(tokenKey),
+  setToken: (token) => localStorage.setItem(tokenKey, token),
+  clear: () => localStorage.removeItem(tokenKey),
+}
 
 function notifyApiListeners() {
   const requests = [...pendingRequests.values()]
@@ -19,11 +26,13 @@ function startRequest(label, path) {
 }
 
 function requestLabel(path, method) {
+  if (path.includes('/auth/')) return method === 'POST' ? 'Securing your workspace' : 'Restoring your workspace'
   if (method === 'POST' && path === '/campaigns') return 'Creating campaign'
   if (path.includes('import-excel')) return 'Importing attendee workbook'
   if (path.includes('/sarvam/launch')) return 'Launching call campaign'
   if (path.includes('/sarvam/status')) return 'Updating campaign status'
   if (path.includes('/sarvam/execution-status')) return 'Checking call delivery status'
+  if (path.includes('/sarvam/analytics')) return 'Loading Sarvam call attempts'
   if (path.endsWith('/attendees')) return 'Loading attendees'
   if (path.endsWith('/preferences-summary')) return 'Loading preference summary'
   if (path.endsWith('/tasks')) return 'Loading action queue'
@@ -93,10 +102,11 @@ async function request(path, options = {}) {
   const method = options.method ?? 'GET'
   const finish = startRequest(requestLabel(path, method), path)
   try {
+    const token = authStore.getToken()
     const response = await fetch(`${apiBaseUrl}${path}`, {
       credentials: 'include',
       ...options,
-      headers: { Accept: 'application/json', ...options.headers },
+      headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
     })
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) {
@@ -127,22 +137,25 @@ function formatTime(value) {
 }
 
 function asRows(counts = {}) {
-  return Object.entries(counts).filter(([, value]) => value > 0).map(([label, value]) => [displayStatus(label), String(value)])
+  return Object.entries(counts).filter(([label, value]) => value > 0 && label !== 'not_provided').map(([label, value]) => [displayStatus(label), String(value)])
 }
 
 function normalizeCampaign(campaign) {
   const event = campaign.event ?? {}
+  const counts = campaign.dashboardCounts ?? {}
   return {
     ...campaign,
-    name: event.name ?? campaign.name,
-    shortName: event.name ?? campaign.name,
+    name: campaign.name,
+    shortName: campaign.name,
+    eventName: event.name ?? 'Event',
     venue: event.venue ?? 'Venue pending',
-    meta: `${formatDate(event.startsAt)} · ${event.capacity ?? 0} seats`,
+    meta: `${event.name ?? 'Event'} · ${formatDate(event.startsAt)} · ${event.capacity ?? 0} seats`,
     status: displayStatus(campaign.state),
-    confirmed: 0,
-    uncertain: 0,
-    declined: 0,
-    uncontacted: 0,
+    confirmed: counts.confirmed ?? campaign.confirmed ?? 0,
+    uncertain: counts.uncertain ?? campaign.uncertain ?? 0,
+    declined: counts.declined ?? campaign.declined ?? 0,
+    uncontacted: counts.awaitingResult ?? campaign.uncontacted ?? 0,
+    attendeeCount: counts.totalAttendees ?? campaign.attendeeCount ?? 0,
     isLaunched: Boolean(campaign.sarvamCampaignId) || ['ACTIVE', 'PAUSED', 'COMPLETED'].includes(campaign.state),
   }
 }
@@ -167,6 +180,9 @@ function normalizeAttendee(attendee) {
       dietaryRequirements: response.dietaryRequirements,
       accessibilityNeeds: response.accessibilityNeeds,
       escalationFlag: response.escalationFlag,
+      declineReason: response.declineReason,
+      seatRelease: response.seatRelease,
+      substituteAttendee: response.substituteAttendee,
       callSummary: response.callSummary,
       createdAt: response.createdAt,
     } : null,
@@ -180,7 +196,7 @@ function normalizeAttendee(attendee) {
   }
 }
 
-function composeDashboard({ attendees, preferences, tasks, waitlist, activity, execution, sarvamCampaign }) {
+function composeDashboard({ attendees, preferences, tasks, waitlist, activity, execution, sarvamCampaign, analytics }) {
   const normalizedAttendees = attendees.map(normalizeAttendee)
   const responses = attendees.flatMap((attendee) => (attendee.responses ?? []).map((response) => ({
     id: response.id,
@@ -205,6 +221,7 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity, e
     attendees: normalizedAttendees,
     responses,
     sarvamCampaign,
+    analytics,
     waitlist: (waitlist.waitlist ?? []).map((attendee) => {
       const offer = offersByAttendee.get(attendee.id)
       return [String(attendee.waitlistRank ?? '—'), attendee.name, attendee.optedIn ? 'Phone contact consented' : 'No phone consent', displayStatus(offer?.status ?? attendee.status), offer?.expiresAt ? formatTime(offer.expiresAt) : 'On release']
@@ -214,13 +231,27 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity, e
 }
 
 export const rallyApi = {
+  signup: async (input) => {
+    const payload = await request('/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    authStore.setToken(payload.token)
+    return payload.user
+  },
+  login: async (input) => {
+    const payload = await request('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    authStore.setToken(payload.token)
+    return payload.user
+  },
+  me: async () => (await request('/auth/me')).user,
+  logout: () => authStore.clear(),
+  getEvents: async () => (await request('/events')).events ?? [],
+  createEvent: async (input) => (await request('/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).event,
   getCampaigns: async () => {
     try {
       const payload = await request('/campaigns')
-      return [...(payload.campaigns ?? []).map(normalizeCampaign), MOCK_CAMPAIGN]
+      return (payload.campaigns ?? []).map(normalizeCampaign)
     } catch (error) {
       console.warn('Campaign API unavailable; showing explicit mock campaign.', error)
-      return [MOCK_CAMPAIGN]
+      return []
     }
   },
   createCampaign: async (input) => {
@@ -238,6 +269,7 @@ export const rallyApi = {
     return request(`/campaigns/${campaignId}/attendees/import-excel`, { method: 'POST', body: form })
   },
   launchCampaign: async (campaignId, startTimestamp, endTimestamp, options = {}) => request(`/campaigns/${campaignId}/sarvam/launch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startTimestamp, endTimestamp, ...options }) }),
+  getSarvamTranscript: (campaignId, interactionId) => request(`/campaigns/${campaignId}/sarvam/analytics/interactions/${encodeURIComponent(interactionId)}/transcript`),
   updateCampaignStatus: async (campaignId, action) => {
     const payload = await request(`/campaigns/${campaignId}/sarvam/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
     return { campaign: normalizeCampaign(payload.campaign), message: payload.message }
@@ -252,11 +284,12 @@ export const rallyApi = {
         finish()
       }
     }
-    const [attendeesPayload, preferences, tasksPayload, waitlist, activityPayload, executionPayload, sarvamStatusPayload] = await Promise.all([
+    const [attendeesPayload, preferences, tasksPayload, waitlist, activityPayload, executionPayload, sarvamStatusPayload, analyticsPayload] = await Promise.all([
       request(`/campaigns/${campaignId}/attendees`), request(`/campaigns/${campaignId}/preferences-summary`), request(`/campaigns/${campaignId}/tasks`), request(`/campaigns/${campaignId}/waitlist`), request(`/campaigns/${campaignId}/activity`),
       request(`/campaigns/${campaignId}/sarvam/execution-status`),
       request(`/campaigns/${campaignId}/sarvam/status`),
+      request(`/campaigns/${campaignId}/sarvam/analytics`).catch((error) => ({ analytics: { error: error.message, summary: null, attempts: [] } })),
     ])
-    return composeDashboard({ attendees: attendeesPayload.attendees ?? [], preferences, tasks: tasksPayload.tasks ?? [], waitlist, activity: activityPayload.activity ?? [], execution: executionPayload.execution, sarvamCampaign: sarvamStatusPayload.sarvamCampaign })
+    return composeDashboard({ attendees: attendeesPayload.attendees ?? [], preferences, tasks: tasksPayload.tasks ?? [], waitlist, activity: activityPayload.activity ?? [], execution: executionPayload.execution, sarvamCampaign: sarvamStatusPayload.sarvamCampaign, analytics: analyticsPayload.analytics })
   },
 }
