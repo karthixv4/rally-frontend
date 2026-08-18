@@ -36,6 +36,7 @@ function requestLabel(path, method) {
   if (path.endsWith('/attendees')) return 'Loading attendees'
   if (path.endsWith('/preferences-summary')) return 'Loading preference summary'
   if (path.endsWith('/tasks')) return 'Loading action queue'
+  if (path.includes('/waitlist/recover')) return 'Reconciling waitlist recovery'
   if (path.endsWith('/waitlist')) return 'Loading waitlist'
   if (path.endsWith('/activity')) return 'Loading call activity'
   if (path === '/campaigns') return 'Loading campaigns'
@@ -226,6 +227,14 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity, e
       const offer = offersByAttendee.get(attendee.id)
       return [String(attendee.waitlistRank ?? '—'), attendee.name, attendee.optedIn ? 'Phone contact consented' : 'No phone consent', displayStatus(offer?.status ?? attendee.status), offer?.expiresAt ? formatTime(offer.expiresAt) : 'On release']
     }),
+    waitlistRecovery: {
+      summary: waitlist.summary ?? {},
+      offers: waitlist.offers ?? [],
+      rows: (waitlist.waitlist ?? []).map((attendee) => {
+        const offer = offersByAttendee.get(attendee.id)
+        return { id: attendee.id, rank: attendee.waitlistRank, name: attendee.name, optedIn: attendee.optedIn, phone: attendee.phone, status: offer?.status ?? attendee.status, expiresAt: offer?.expiresAt ?? null, seatNumber: offer?.seat?.seatNumber ?? null, callRequestedAt: offer?.callRequestedAt ?? null, callFailureReason: offer?.callFailureReason ?? null }
+      })
+    },
     execution,
   }
 }
@@ -268,6 +277,8 @@ export const rallyApi = {
     form.append('file', file)
     return request(`/campaigns/${campaignId}/attendees/import-excel`, { method: 'POST', body: form })
   },
+  copyCampaignAudience: (campaignId, sourceCampaignId) => request(`/campaigns/${campaignId}/attendees/copy-from/${sourceCampaignId}`, { method: 'POST' }),
+  recoverWaitlist: (campaignId) => request(`/campaigns/${campaignId}/waitlist/recover`, { method: 'POST' }),
   launchCampaign: async (campaignId, startTimestamp, endTimestamp, options = {}) => request(`/campaigns/${campaignId}/sarvam/launch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startTimestamp, endTimestamp, ...options }) }),
   getSarvamTranscript: (campaignId, interactionId) => request(`/campaigns/${campaignId}/sarvam/analytics/interactions/${encodeURIComponent(interactionId)}/transcript`),
   updateCampaignStatus: async (campaignId, action) => {
