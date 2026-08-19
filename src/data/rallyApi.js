@@ -28,6 +28,8 @@ function startRequest(label, path) {
 function requestLabel(path, method) {
   if (path.includes('/auth/')) return method === 'POST' ? 'Securing your workspace' : 'Restoring your workspace'
   if (method === 'POST' && path === '/campaigns') return 'Creating campaign'
+  if (path.includes('preview-excel')) return 'Reading attendee workbook'
+  if (path.includes('preview-google-forms')) return 'Reading Google Forms responses'
   if (path.includes('import-excel')) return 'Importing attendee workbook'
   if (path.includes('/sarvam/launch')) return 'Launching call campaign'
   if (path.includes('/sarvam/status')) return 'Updating campaign status'
@@ -228,6 +230,7 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity, e
       return [String(attendee.waitlistRank ?? '—'), attendee.name, attendee.optedIn ? 'Phone contact consented' : 'No phone consent', displayStatus(offer?.status ?? attendee.status), offer?.expiresAt ? formatTime(offer.expiresAt) : 'On release']
     }),
     waitlistRecovery: {
+      autoCallWaitlist: waitlist.autoCallWaitlist === true,
       summary: waitlist.summary ?? {},
       offers: waitlist.offers ?? [],
       rows: (waitlist.waitlist ?? []).map((attendee) => {
@@ -240,6 +243,7 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity, e
 }
 
 export const rallyApi = {
+  attendeeTemplateUrl: `${apiBaseUrl.replace(/\/api$/, '')}/api/attendee-template`,
   signup: async (input) => {
     const payload = await request('/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
     authStore.setToken(payload.token)
@@ -254,6 +258,7 @@ export const rallyApi = {
   logout: () => authStore.clear(),
   getEvents: async () => (await request('/events')).events ?? [],
   createEvent: async (input) => (await request('/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).event,
+  deleteEvent: (eventId) => request(`/events/${eventId}`, { method: 'DELETE' }),
   getCampaigns: async () => {
     try {
       const payload = await request('/campaigns')
@@ -265,13 +270,20 @@ export const rallyApi = {
   },
   createCampaign: async (input) => {
     const payload = await request('/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
-    return normalizeCampaign({ ...payload.campaign, event: payload.event })
+    return { ...normalizeCampaign({ ...payload.campaign, event: payload.event }), attendees: payload.attendees ?? [], allocation: payload.allocation ?? null }
   },
   updateCampaign: async (campaignId, input) => {
     const payload = await request(`/campaigns/${campaignId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
     return normalizeCampaign(payload.campaign)
   },
   deleteCampaign: (campaignId) => request(`/campaigns/${campaignId}`, { method: 'DELETE' }),
+  previewAttendeeExcel: async (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request('/campaigns/attendees/preview-excel', { method: 'POST', body: form })
+  },
+  previewGoogleForms: (url) => request('/campaigns/attendees/preview-google-forms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }),
+  getCampaignAttendees: async (campaignId) => (await request(`/campaigns/${campaignId}/attendees`)).attendees ?? [],
   importExcel: async (campaignId, file) => {
     const form = new FormData()
     form.append('file', file)
