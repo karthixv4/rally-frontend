@@ -5,6 +5,47 @@ import { authStore, rallyApi, subscribeToApiActivity } from './data/rallyApi'
 const navItems = [
   ['operations', 'Operations', LayoutDashboard], ['setup', 'Campaign setup', SlidersHorizontal], ['attendees', 'Attendees', Users], ['waitlist', 'Waitlist recovery', ListPlus], ['summary', 'Summary', Flag],
 ]
+const authStories = [
+  {
+    eyebrow: 'EVENT OPERATIONS, MADE CLEAR',
+    title: 'Every RSVP becomes a decision you can act on.',
+    description: 'Bring your attendee list. Rally coordinates voice outreach and keeps the next operational decision in view.',
+    panelTitle: 'Audience readiness',
+    status: 'Live',
+    rows: [
+      ['01', 'Create an event', 'Set the venue, date and capacity', 'Ready'],
+      ['02', 'Prepare a campaign', 'Choose what Rally should collect', 'Draft'],
+      ['03', 'See results arrive', 'Attendance, travel and follow-ups', 'Live'],
+    ],
+    signals: ['Consent-aware calls', 'Live response capture', 'Organiser follow-ups'],
+  },
+  {
+    eyebrow: 'CALL DELIVERY, WITHOUT THE GUESSWORK',
+    title: 'Know what happened to every attendee, not just every campaign.',
+    description: 'Rally keeps Sarvam call attempts, completed responses and follow-up work together in one clear view.',
+    panelTitle: 'Delivery control centre',
+    status: 'Tracked',
+    rows: [
+      ['09:12', 'Call requested', 'Sarvam is working through the audience', 'Queued'],
+      ['09:24', 'Conversation completed', 'Response saved to the campaign', 'Saved'],
+      ['09:26', 'Needs attention', 'A clear organiser follow-up is created', 'Review'],
+    ],
+    signals: ['Attempt history', 'Call transcripts', 'Clear next steps'],
+  },
+  {
+    eyebrow: 'FILL THE ROOM, THOUGHTFULLY',
+    title: 'Turn a declined RSVP into a timely waitlist opportunity.',
+    description: 'When a seat is released, Rally helps your team see who is next and how recovery should happen.',
+    panelTitle: 'Waitlist recovery',
+    status: 'Ready',
+    rows: [
+      ['01', 'A seat opens', 'A declined attendee releases their place', 'Released'],
+      ['02', 'Review the queue', 'See the next eligible attendee', 'Next up'],
+      ['03', 'Recover the seat', 'Call automatically or trigger it yourself', 'Action'],
+    ],
+    signals: ['Capacity clarity', 'Fair queue order', 'No wasted seats'],
+  },
+]
 const statusClass = (status) => {
   const normalized = String(status || '').trim().toLowerCase()
   if (['confirmed', 'campaign live', 'accepted'].includes(normalized)) return 'accent'
@@ -243,6 +284,11 @@ function AuthScreen({ onAuthenticated, theme, onToggleTheme }) {
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [storyIndex, setStoryIndex] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setStoryIndex((current) => (current + 1) % authStories.length), 5600)
+    return () => window.clearInterval(timer)
+  }, [])
   const update = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
   const submit = async (event) => {
     event.preventDefault()
@@ -255,7 +301,8 @@ function AuthScreen({ onAuthenticated, theme, onToggleTheme }) {
     } catch (authError) { setError(authError.message) } finally { setBusy(false) }
   }
   const isSignup = mode === 'signup'
-  return <main className="auth-shell"><ThemeToggle theme={theme} onToggle={onToggleTheme} className="auth-theme-toggle" /><section className="auth-story"><div className="auth-brand"><strong>Rally</strong><span>Event readiness</span></div><div className="auth-copy"><small>EVENT OPERATIONS, MADE CLEAR</small><h1>Every RSVP becomes a decision you can act on.</h1><p>Bring your attendee list. Rally coordinates voice outreach and keeps the next operational decision in view.</p></div><div className="auth-proof" aria-label="Example event schedule"><div className="auth-proof-heading"><span>Today’s run</span><b><i /> Live</b></div><div className="auth-proof-row"><time>09:12</time><span><b>Nvidia hackathon</b><small>RSVP confirmation</small></span><em>42 / 45</em></div><div className="auth-proof-row"><time>11:40</time><span><b>Design review</b><small>Reminder call</small></span><em>6 retry</em></div><div className="auth-proof-row"><time>16:00</time><span><b>Alumni dinner</b><small>Waitlist recovery</small></span><em>Queued</em></div></div><div className="auth-signals"><span>Consent-aware calls</span><span>Live response capture</span><span>Organiser follow-ups</span></div></section><section className="auth-panel"><div className="auth-form-wrap"><div className="auth-kicker">WELCOME TO RALLY</div><h2>{isSignup ? 'Create your workspace' : 'Welcome back'}</h2><p>{isSignup ? 'Start organising your events with a secure Rally account.' : 'Sign in to continue to your event operations.'}</p><div className="auth-mode"><button className={!isSignup ? 'active' : ''} onClick={() => { setMode('login'); setError('') }}>Sign in</button><button className={isSignup ? 'active' : ''} onClick={() => { setMode('signup'); setError('') }}>Create account</button></div><form onSubmit={submit}>{isSignup && <label>Name<input value={form.name} onChange={update('name')} placeholder="Your name" autoComplete="name" /></label>}<label>Email<input required type="email" value={form.email} onChange={update('email')} placeholder="you@company.com" autoComplete="email" /></label><label>Password<input required type="password" minLength="8" value={form.password} onChange={update('password')} placeholder="At least 8 characters" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label>{error && <div className="error-banner">{error}</div>}<Button type="submit" disabled={busy}>{busy ? 'Signing you in…' : isSignup ? 'Create account' : 'Sign in to Rally'}</Button></form><small className="auth-security">Your session is signed. Use a unique password of at least eight characters.</small></div></section></main>
+  const story = authStories[storyIndex]
+  return <main className="auth-shell"><ThemeToggle theme={theme} onToggle={onToggleTheme} className="auth-theme-toggle" /><section className="auth-story"><div className="auth-brand"><strong>Rally</strong><span>Event readiness</span></div><div className="auth-story-stage" key={story.title}><div className="auth-copy"><small>{story.eyebrow}</small><h1>{story.title}</h1><p>{story.description}</p></div><div className="auth-proof" aria-label={story.panelTitle}><div className="auth-proof-heading"><span>{story.panelTitle}</span><b><i /> {story.status}</b></div>{story.rows.map(([time, title, detail, state]) => <div className="auth-proof-row" key={`${time}-${title}`}><time>{time}</time><span><b>{title}</b><small>{detail}</small></span><em>{state}</em></div>)}</div></div><div className="auth-story-footer"><div className="auth-story-dots" aria-label="Rally feature highlights">{authStories.map((item, index) => <button key={item.title} className={index === storyIndex ? 'active' : ''} onClick={() => setStoryIndex(index)} aria-label={`Show ${item.panelTitle}`} aria-current={index === storyIndex} />)}</div><div className="auth-signals">{story.signals.map((signal) => <span key={signal}>{signal}</span>)}</div></div></section><section className="auth-panel"><div className="auth-form-wrap"><div className="auth-kicker">WELCOME TO RALLY</div><h2>{isSignup ? 'Create your workspace' : 'Welcome back'}</h2><p>{isSignup ? 'Start organising your events with a secure Rally account.' : 'Sign in to continue to your event operations.'}</p><div className="auth-mode"><button className={!isSignup ? 'active' : ''} onClick={() => { setMode('login'); setError('') }}>Sign in</button><button className={isSignup ? 'active' : ''} onClick={() => { setMode('signup'); setError('') }}>Create account</button></div><form onSubmit={submit}>{isSignup && <label>Name<input value={form.name} onChange={update('name')} placeholder="Your name" autoComplete="name" /></label>}<label>Email<input required type="email" value={form.email} onChange={update('email')} placeholder="you@company.com" autoComplete="email" /></label><label>Password<input required type="password" minLength="8" value={form.password} onChange={update('password')} placeholder="At least 8 characters" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label>{error && <div className="error-banner">{error}</div>}<Button type="submit" disabled={busy}>{busy ? 'Signing you in…' : isSignup ? 'Create account' : 'Sign in to Rally'}</Button></form><small className="auth-security">Your session is signed. Use a unique password of at least eight characters.</small></div></section></main>
 }
 
 function Events({ events, onChoose, onNew }) { return <section><Header kicker="Events" title="Your event workspace" description="Create an event first, then run one or more audience campaigns inside it." action={<Button icon={Plus} onClick={onNew}>New event</Button>} />
