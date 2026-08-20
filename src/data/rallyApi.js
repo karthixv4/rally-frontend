@@ -27,6 +27,7 @@ function startRequest(label, path) {
 
 function requestLabel(path, method) {
   if (path.includes('/auth/')) return method === 'POST' ? 'Securing your workspace' : 'Restoring your workspace'
+  if (path.includes('/admin/overview')) return 'Loading administrator overview'
   if (method === 'POST' && path === '/campaigns') return 'Creating campaign'
   if (path.includes('preview-excel')) return 'Reading attendee workbook'
   if (path.includes('preview-google-forms')) return 'Reading Google Forms responses'
@@ -233,6 +234,7 @@ function composeDashboard({ attendees, preferences, tasks, waitlist, activity, e
       autoCallWaitlist: waitlist.autoCallWaitlist === true,
       summary: waitlist.summary ?? {},
       offers: waitlist.offers ?? [],
+      releasedSeats: waitlist.releasedSeats ?? [],
       rows: (waitlist.waitlist ?? []).map((attendee) => {
         const offer = offersByAttendee.get(attendee.id)
         return { id: attendee.id, rank: attendee.waitlistRank, name: attendee.name, optedIn: attendee.optedIn, phone: attendee.phone, status: offer?.status ?? attendee.status, expiresAt: offer?.expiresAt ?? null, seatNumber: offer?.seat?.seatNumber ?? null, callRequestedAt: offer?.callRequestedAt ?? null, callFailureReason: offer?.callFailureReason ?? null }
@@ -256,6 +258,7 @@ export const rallyApi = {
   },
   me: async () => (await request('/auth/me')).user,
   logout: () => authStore.clear(),
+  getAdminOverview: () => request('/admin/overview'),
   getEvents: async () => (await request('/events')).events ?? [],
   createEvent: async (input) => (await request('/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).event,
   deleteEvent: (eventId) => request(`/events/${eventId}`, { method: 'DELETE' }),

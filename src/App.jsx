@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CalendarDays, Check, Download, Flag, LayoutDashboard, ListPlus, LoaderCircle, LogOut, Menu, Pause, Plus, RefreshCw, Rocket, SlidersHorizontal, Trash2, Upload, Users } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Check, Download, Flag, LayoutDashboard, ListPlus, LoaderCircle, LogOut, Menu, Moon, Pause, Plus, RefreshCw, Rocket, ShieldCheck, SlidersHorizontal, Sun, Trash2, Upload, Users } from 'lucide-react'
 import { authStore, rallyApi, subscribeToApiActivity } from './data/rallyApi'
 
 const navItems = [
@@ -69,8 +69,20 @@ function App() {
   const [pendingRequests, setPendingRequests] = useState([])
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [theme, setTheme] = useState(() => {
+    try {
+      const savedTheme = typeof window === 'undefined' ? null : window.localStorage.getItem('rally-theme')
+      return savedTheme === 'dark' ? 'dark' : 'light'
+    } catch {
+      return 'light'
+    }
+  })
 
   useEffect(() => subscribeToApiActivity(setPendingRequests), [])
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try { window.localStorage.setItem('rally-theme', theme) } catch {}
+  }, [theme])
   const refreshCampaigns = async () => {
     try {
       const items = await rallyApi.getCampaigns()
@@ -99,7 +111,10 @@ function App() {
       return () => { active = false }
     }
     rallyApi.me().then((currentUser) => {
-      if (active) setUser(currentUser)
+      if (active) {
+        setUser(currentUser)
+        if (currentUser.role === 'ADMIN') setView('admin')
+      }
     }).catch(() => {
       authStore.clear()
     }).finally(() => {
@@ -188,22 +203,25 @@ function App() {
     setView('events')
   }
   if (authLoading) return <PageLoader requests={pendingRequests} />
-  if (!user) return <AuthScreen onAuthenticated={(currentUser) => { setUser(currentUser); setLoading(true) }} />
+  if (!user) return <AuthScreen theme={theme} onToggleTheme={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} onAuthenticated={(currentUser) => { setUser(currentUser); if (currentUser.role === 'ADMIN') setView('admin'); setLoading(true) }} />
   if (loading) return <PageLoader requests={pendingRequests} />
+  const openingCampaign = Boolean(campaign && !details && view === 'operations')
 
   return <div className={`app-shell ${mobileNav ? 'mobile-nav-open' : ''}`}>
     <button className="menu-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation" aria-expanded={mobileNav}><Menu size={20} /></button>
     {mobileNav && <button className="mobile-scrim" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
     <Sidebar campaign={campaign} view={view} user={user} onSignOut={signOut} onNavigate={(nextView) => { setView(nextView); setMobileNav(false) }} onHome={() => { setSelectedEvent(null); setView('events'); setMobileNav(false); Promise.all([refreshCampaigns(), refreshEvents()]) }} open={mobileNav} />
+    <div className="app-topbar"><ThemeToggle theme={theme} onToggle={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} /></div>
     <main className="main-content">
-      <ApiActivity requests={pendingRequests} />
+      <ApiActivity requests={openingCampaign ? [] : pendingRequests} />
       {error && <div className="error-banner">{error}</div>}
+      {view === 'admin' && user.role === 'ADMIN' && <AdminDashboard />}
       {view === 'events' && <Events events={events} onChoose={chooseEvent} onNew={() => { setSelectedEvent(null); setView('new-event') }} />}
       {view === 'new-event' && <NewEvent onBack={() => setView('events')} onCreated={handleEventCreated} />}
        {view === 'event-campaigns' && selectedEvent && <EventCampaigns event={selectedEvent} campaigns={campaigns.filter((item) => item.eventId === selectedEvent.id)} onBack={() => setView('events')} onChoose={chooseCampaign} onNew={() => openNew(selectedEvent)} onDeleted={handleEventDeleted} />}
       {view === 'new' && <NewCampaign initialEvent={selectedEvent} onBack={() => setView(selectedEvent ? 'event-campaigns' : 'events')} onCreated={handleCreated} />}
       {campaign && details && view === 'operations' && <Operations campaign={campaign} details={details} onCampaignUpdated={handleCampaignUpdated} onRefresh={refreshCampaignDetails} onDeleted={handleCampaignDeleted} />}
-      {campaign && !details && view === 'operations' && <DetailsLoader campaign={campaign} requests={pendingRequests} />}
+      {campaign && !details && view === 'operations' && <DetailsLoader campaign={campaign} />}
       {campaign && view === 'setup' && <Setup campaign={campaign} onCampaignUpdated={handleCampaignUpdated} />}
       {campaign && view === 'attendees' && <Attendees people={details?.attendees ?? []} selected={selectedPerson} onSelect={setSelectedPerson} />}
        {campaign && view === 'waitlist' && <Waitlist campaign={campaign} recovery={details?.waitlistRecovery} onRefresh={refreshCampaignDetails} />}
@@ -214,13 +232,13 @@ function App() {
 
 function Sidebar({ campaign, view, user, onSignOut, onNavigate, onHome, open }) { return <aside className={`sidebar ${open ? 'is-open' : ''}`}>
   <div className="brand"><strong>Rally</strong><span>Event readiness agent</span></div>
-  <nav><button className={view === 'events' || view === 'event-campaigns' || view === 'new-event' ? 'active' : ''} onClick={onHome}><LayoutDashboard size={16} />All events</button>
+  <nav>{user.role === 'ADMIN' && <button className={view === 'admin' ? 'active' : ''} onClick={() => onNavigate('admin')}><ShieldCheck size={16} />Admin overview</button>}<button className={view === 'events' || view === 'event-campaigns' || view === 'new-event' ? 'active' : ''} onClick={onHome}><LayoutDashboard size={16} />All events</button>
   {campaign && <><div className="nav-label">{campaign.shortName}</div>{navItems.filter(([id]) => id !== 'setup' || !campaign.isLaunched).map(([id, label, Icon]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => onNavigate(id)}><Icon size={16} />{label}</button>)}</>}</nav>
   {campaign && <div className="campaign-state"><b>{campaign.shortName}</b><span>{campaign.meta}</span><small><i /> {campaign.status}</small></div>}
   <div className="account-card"><span>{user.name || user.email}</span><button onClick={onSignOut}><LogOut size={14} />Sign out</button></div>
 </aside> }
 
-function AuthScreen({ onAuthenticated }) {
+function AuthScreen({ onAuthenticated, theme, onToggleTheme }) {
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [busy, setBusy] = useState(false)
@@ -237,11 +255,26 @@ function AuthScreen({ onAuthenticated }) {
     } catch (authError) { setError(authError.message) } finally { setBusy(false) }
   }
   const isSignup = mode === 'signup'
-  return <main className="auth-shell"><section className="auth-story"><div className="auth-brand"><strong>Rally</strong><span>Event readiness agent</span></div><div className="auth-copy"><small>EVENT OPERATIONS, MADE CLEAR</small><h1>Every RSVP becomes a decision you can act on.</h1><p>Bring your attendee list, let Rally coordinate voice outreach, and see the readiness of every event in one calm workspace.</p></div><div className="auth-orbit" aria-hidden="true"><i /><i /><i /><div><span>CALL DELIVERY</span><b>RSVP, without the chase.</b></div></div><div className="auth-signals"><span>Consent-aware calls</span><span>Live response capture</span><span>Organiser follow-ups</span></div></section><section className="auth-panel"><div className="auth-form-wrap"><div className="auth-kicker">WELCOME TO RALLY</div><h2>{isSignup ? 'Create your workspace' : 'Welcome back'}</h2><p>{isSignup ? 'Start organising your events with a secure Rally account.' : 'Sign in to continue to your event operations.'}</p><div className="auth-mode"><button className={!isSignup ? 'active' : ''} onClick={() => { setMode('login'); setError('') }}>Sign in</button><button className={isSignup ? 'active' : ''} onClick={() => { setMode('signup'); setError('') }}>Create account</button></div><form onSubmit={submit}>{isSignup && <label>Name<input value={form.name} onChange={update('name')} placeholder="Your name" autoComplete="name" /></label>}<label>Email<input required type="email" value={form.email} onChange={update('email')} placeholder="you@company.com" autoComplete="email" /></label><label>Password<input required type="password" minLength="8" value={form.password} onChange={update('password')} placeholder="At least 8 characters" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label>{error && <div className="error-banner">{error}</div>}<Button type="submit" disabled={busy}>{busy ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in to Rally'}</Button></form><small className="auth-security">Your account is protected with a signed session. Use a unique password of at least 8 characters.</small></div></section></main>
+  return <main className="auth-shell"><ThemeToggle theme={theme} onToggle={onToggleTheme} className="auth-theme-toggle" /><section className="auth-story"><div className="auth-brand"><strong>Rally</strong><span>Event readiness</span></div><div className="auth-copy"><small>EVENT OPERATIONS, MADE CLEAR</small><h1>Every RSVP becomes a decision you can act on.</h1><p>Bring your attendee list. Rally coordinates voice outreach and keeps the next operational decision in view.</p></div><div className="auth-proof" aria-label="Example event schedule"><div className="auth-proof-heading"><span>Today’s run</span><b><i /> Live</b></div><div className="auth-proof-row"><time>09:12</time><span><b>Nvidia hackathon</b><small>RSVP confirmation</small></span><em>42 / 45</em></div><div className="auth-proof-row"><time>11:40</time><span><b>Design review</b><small>Reminder call</small></span><em>6 retry</em></div><div className="auth-proof-row"><time>16:00</time><span><b>Alumni dinner</b><small>Waitlist recovery</small></span><em>Queued</em></div></div><div className="auth-signals"><span>Consent-aware calls</span><span>Live response capture</span><span>Organiser follow-ups</span></div></section><section className="auth-panel"><div className="auth-form-wrap"><div className="auth-kicker">WELCOME TO RALLY</div><h2>{isSignup ? 'Create your workspace' : 'Welcome back'}</h2><p>{isSignup ? 'Start organising your events with a secure Rally account.' : 'Sign in to continue to your event operations.'}</p><div className="auth-mode"><button className={!isSignup ? 'active' : ''} onClick={() => { setMode('login'); setError('') }}>Sign in</button><button className={isSignup ? 'active' : ''} onClick={() => { setMode('signup'); setError('') }}>Create account</button></div><form onSubmit={submit}>{isSignup && <label>Name<input value={form.name} onChange={update('name')} placeholder="Your name" autoComplete="name" /></label>}<label>Email<input required type="email" value={form.email} onChange={update('email')} placeholder="you@company.com" autoComplete="email" /></label><label>Password<input required type="password" minLength="8" value={form.password} onChange={update('password')} placeholder="At least 8 characters" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label>{error && <div className="error-banner">{error}</div>}<Button type="submit" disabled={busy}>{busy ? 'Signing you in…' : isSignup ? 'Create account' : 'Sign in to Rally'}</Button></form><small className="auth-security">Your session is signed. Use a unique password of at least eight characters.</small></div></section></main>
 }
 
 function Events({ events, onChoose, onNew }) { return <section><Header kicker="Events" title="Your event workspace" description="Create an event first, then run one or more audience campaigns inside it." action={<Button icon={Plus} onClick={onNew}>New event</Button>} />
-  {!events.length ? <div className="empty-workspace"><span><Plus size={22} /></span><h2>Create your first event</h2><p>An event is the home for its venue, date, capacity, attendee roster, and every campaign you run for it.</p><Button icon={Plus} onClick={onNew}>Create event</Button></div> : <div className="event-grid">{events.map((event) => <button className="event-card" key={event.id} onClick={() => onChoose(event)}><div className="card-top"><div><small>EVENT</small><h2>{event.name}</h2><p>{formatDateTime(event.startsAt)} · {event.venue || 'Venue pending'}</p></div><Tag type="neutral">{event._count?.campaigns ?? 0} campaign{(event._count?.campaigns ?? 0) === 1 ? '' : 's'}</Tag></div><div className="event-card-footer"><span>{event.capacity ?? '—'} seats</span><span>{event._count?.attendees ?? 0} attendees</span><b>Open event →</b></div></button>)}</div>}</section> }
+  {!events.length ? <div className="empty-workspace"><span><Plus size={22} /></span><h2>Create your first event</h2><p>An event is the home for its venue, date, capacity, attendee roster, and every campaign you run for it.</p><Button icon={Plus} onClick={onNew}>Create event</Button></div> : <div className="event-grid">{events.map((event) => { const campaignCount = event._count?.campaigns ?? 0; const attendeeCount = event._count?.attendees ?? 0; return <button className="event-card" key={event.id} onClick={() => onChoose(event)}><div className="event-card-main"><small className="event-card-kicker">Event workspace</small><h2>{event.name}</h2><p>{formatDateTime(event.startsAt)} <i>·</i> {event.venue || 'Venue pending'}</p><div className="event-card-metrics"><span><b>{campaignCount}</b> campaign{campaignCount === 1 ? '' : 's'}</span><span><b>{event.capacity ?? '—'}</b> seats</span><span><b>{attendeeCount}</b> attendees</span></div></div><span className="event-card-action">Open workspace <b>→</b></span></button> })}</div>}</section> }
+
+function AdminDashboard() {
+  const [overview, setOverview] = useState(null)
+  const [error, setError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+  const load = async () => {
+    try {
+      setRefreshing(true); setError('')
+      setOverview(await rallyApi.getAdminOverview())
+    } catch (loadError) { setError(loadError.message) } finally { setRefreshing(false) }
+  }
+  useEffect(() => { load() }, [])
+  const summary = overview?.summary
+  return <section><Header kicker="Administrator" title="Rally workspace health" description="Aggregate product usage only. Campaign, attendee, and conversation details remain private to their organisers." action={<Button icon={RefreshCw} variant="secondary" onClick={load} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button>} />{error && <div className="error-banner">{error}</div>}{!overview && !error ? <div className="admin-loading"><LoaderCircle className="spinner" size={22} />Loading workspace metrics…</div> : overview && <><div className="admin-stats"><Stat number={summary.totalUsers} label="registered users" /><Stat number={summary.activeUsersLast7Days} label="active in 7 days" /><Stat number={summary.totalLogins} label="successful logins" /><Stat number={summary.newUsersLast7Days} label="new users in 7 days" /><Stat number={summary.totalEvents} label="event workspaces" /><Stat number={summary.totalCampaigns} label="campaigns created" /><Stat number={summary.capturedResults} label="results captured" /></div><section className="admin-users"><div><small>User activity</small><h2>Organiser accounts</h2><p>Counts are shown per account without exposing event or campaign content.</p></div><div className="admin-table"><table><thead><tr><th>User</th><th>Role</th><th>Last sign-in</th><th>Logins</th><th>Events</th><th>Campaigns</th><th>Results</th></tr></thead><tbody>{overview.users.map((account) => <tr key={account.id}><td><b>{account.name || 'Unnamed user'}</b><br /><span>{account.email}</span></td><td><Tag type={account.role === 'ADMIN' ? 'accent' : 'neutral'}>{displayStatus(account.role)}</Tag></td><td>{account.lastLoginAt ? formatDateTime(account.lastLoginAt) : 'Never'}</td><td>{account.loginCount}</td><td>{account.eventCount}</td><td>{account.campaignCount}</td><td>{account.capturedResultCount}</td></tr>)}{!overview.users.length && <tr><td colSpan="7">No accounts have been created yet.</td></tr>}</tbody></table></div></section></>}</section>
+}
 
 function NewEvent({ onBack, onCreated }) {
   const [form, setForm] = useState({ name: '', startsAt: '', venue: '', capacity: '' })
@@ -561,15 +594,15 @@ function SarvamAnalytics({ analytics, campaignId, execution, results = [] }) {
 
 function ExecutionStatus({ execution, sarvamCampaign }) {
   const [showDetails, setShowDetails] = useState(false)
-  const isEnded = execution?.schedulerState === 'schedule_ended'
-  useEffect(() => { if (isEnded) setShowDetails(false) }, [isEnded])
+  const isFinished = ['schedule_ended', 'completed'].includes(execution?.schedulerState)
+  useEffect(() => { if (isFinished) setShowDetails(false) }, [isFinished])
   if (!execution) return null
   const { attendees, results, schedulerState, hasSarvamSchedule, schedule, latestActivity } = execution
-  const title = schedulerState === 'scheduled' ? 'Calls are scheduled with Sarvam.' : schedulerState === 'calling_window_open' ? 'Sarvam is within the planned calling window.' : schedulerState === 'schedule_time_unknown' ? 'Sarvam has a schedule, but Rally does not have its timing.' : schedulerState === 'paused' ? 'Campaign calling is paused.' : isEnded ? 'The scheduled calling window has ended.' : 'This campaign has not been launched.'
-  const next = !hasSarvamSchedule ? 'Finish campaign setup and launch when the attendee list is ready.' : schedulerState === 'schedule_time_unknown' ? 'This is an older schedule. Its start and end time were not stored; new launches will show both times here.' : schedulerState === 'scheduled' ? `First calls are planned from ${formatDateTime(schedule?.startsAt)}.` : schedulerState === 'paused' ? 'Resume the campaign when you are ready for Sarvam to continue.' : `${attendees.awaitingCallOrResult} eligible attendees are still awaiting a completed result.`
-  const header = <div className="execution-heading"><div><small>Call plan</small><h2>{title}</h2></div><Tag type={hasSarvamSchedule ? 'accent' : 'neutral'}>{displayStatus(schedulerState)}</Tag></div>
-  if (isEnded && !showDetails) return <section className="execution-status execution-status-compact"><div>{header}<p>{results.total} results were captured. {attendees.awaitingCallOrResult} attendees are still awaiting a completed result.</p></div><Button variant="secondary" onClick={() => setShowDetails(true)}>View call plan</Button></section>
-  return <section className={`execution-status ${hasSarvamSchedule ? 'is-scheduled' : 'needs-launch'}`}>{header}{isEnded && <Button className="compact-control" variant="secondary" onClick={() => setShowDetails(false)}>Minimise</Button>}<p>{next}</p><div className="execution-grid"><Stat number={attendees.eligible} label="ready to call" /><Stat number={attendees.awaitingCallOrResult} label="not completed" /><Stat number={results.total} label="results received" /><Stat number={attendees.notOptedIn + attendees.waitlistedOrReleased + attendees.missingPhone} label="not callable" /></div><div className="execution-notes"><span>Scheduled start: {formatDateTime(sarvamCampaign?.startTimestamp || schedule?.startsAt)}</span><span>Scheduled end: {formatDateTime(sarvamCampaign?.endTimestamp || schedule?.endsAt)}</span><span>{attendees.notOptedIn} not opted in</span><span>{attendees.waitlistedOrReleased} waitlisted/released</span><span>{attendees.missingPhone} missing phone</span></div>{sarvamCampaign && <div className="execution-latest">Sarvam status: <b>{displayStatus(sarvamCampaign.status)}</b> · ID: {sarvamCampaign.id}</div>}{latestActivity && <div className="execution-latest">Latest Rally event: <b>{displayStatus(latestActivity.eventType)}</b>{latestActivity.attendeeName ? ` · ${latestActivity.attendeeName}` : ''} · {formatTime(latestActivity.occurredAt)}</div>}</section>
+  const title = schedulerState === 'scheduled' ? 'Calls are scheduled with Sarvam.' : schedulerState === 'calling_window_open' ? 'Sarvam is within the planned calling window.' : schedulerState === 'schedule_time_unknown' ? 'Sarvam has a schedule, but Rally does not have its timing.' : schedulerState === 'paused' ? 'Campaign calling is paused.' : schedulerState === 'completed' ? 'Every call is settled; this run closed early.' : schedulerState === 'schedule_ended' ? 'The scheduled calling window has ended.' : 'This campaign has not been launched.'
+  const next = !hasSarvamSchedule ? 'Finish campaign setup and launch when the attendee list is ready.' : schedulerState === 'schedule_time_unknown' ? 'This is an older schedule. Its start and end time were not stored; new launches will show both times here.' : schedulerState === 'scheduled' ? `First calls are planned from ${formatDateTime(schedule?.startsAt)}.` : schedulerState === 'paused' ? 'Resume the campaign when you are ready for Sarvam to continue.' : schedulerState === 'completed' ? 'Rally stopped the remaining Sarvam window only after analytics found no outstanding calls or queued retries.' : `${attendees.awaitingCallOrResult} eligible attendees are still awaiting a completed result.`
+  const header = (action) => <div className="execution-heading"><div><small>Call plan</small><h2>{title}</h2></div><div className="execution-controls"><Tag type={hasSarvamSchedule ? 'accent' : 'neutral'}>{displayStatus(schedulerState)}</Tag>{action}</div></div>
+  if (isFinished && !showDetails) return <section className="execution-status execution-status-compact"><div className="execution-compact-copy">{header(<Button className="execution-toggle" variant="secondary" onClick={() => setShowDetails(true)}>View call plan</Button>)}<p>{results.total} results were captured. {attendees.awaitingCallOrResult} attendees are still awaiting a completed result.</p></div></section>
+  return <section className={`execution-status ${hasSarvamSchedule ? 'is-scheduled' : 'needs-launch'}`}>{header(isFinished ? <Button className="execution-toggle" variant="secondary" onClick={() => setShowDetails(false)}>Minimise</Button> : null)}<p>{next}</p><div className="execution-grid"><Stat number={attendees.eligible} label="ready to call" /><Stat number={attendees.awaitingCallOrResult} label="not completed" /><Stat number={results.total} label="results received" /><Stat number={attendees.notOptedIn + attendees.waitlistedOrReleased + attendees.missingPhone} label="not callable" /></div><div className="execution-notes"><span>Scheduled start: {formatDateTime(sarvamCampaign?.startTimestamp || schedule?.startsAt)}</span><span>Scheduled end: {formatDateTime(sarvamCampaign?.endTimestamp || schedule?.endsAt)}</span><span>{attendees.notOptedIn} not opted in</span><span>{attendees.waitlistedOrReleased} waitlisted/released</span><span>{attendees.missingPhone} missing phone</span></div>{sarvamCampaign && <div className="execution-latest">Sarvam status: <b>{displayStatus(sarvamCampaign.status)}</b> · ID: {sarvamCampaign.id}</div>}{latestActivity && <div className="execution-latest">Latest Rally event: <b>{displayStatus(latestActivity.eventType)}</b>{latestActivity.attendeeName ? ` · ${latestActivity.attendeeName}` : ''} · {formatTime(latestActivity.occurredAt)}</div>}</section>
 }
 
 function Setup({ campaign, onCampaignUpdated }) {
@@ -629,6 +662,9 @@ function Waitlist({ campaign, recovery, onRefresh }) {
   const [error, setError] = useState('')
   const summary = recovery?.summary ?? {}
   const rows = recovery?.rows ?? []
+  const offers = recovery?.offers ?? []
+  const releasedSeats = recovery?.releasedSeats ?? []
+  const nextCandidate = rows.find((row) => String(row.status).toUpperCase() === 'WAITLISTED' && row.optedIn && row.phone)
   const automatic = recovery?.autoCallWaitlist === true
   const recover = async () => {
     try {
@@ -638,7 +674,7 @@ function Waitlist({ campaign, recovery, onRefresh }) {
       await onRefresh()
     } catch (recoveryError) { setError(recoveryError.message) } finally { setBusy(false) }
   }
-  return <section><Header kicker="Waitlist recovery" title="Keep every released seat moving" description={automatic ? 'Rally waits until the primary call run is complete, then offers released seats to the next consented people in this queue.' : 'Released seats stay under organiser control until you start recovery.'} action={<Button variant="secondary" onClick={recover} disabled={busy}>{busy ? 'Starting calls…' : 'Offer and call next attendees'}</Button>} /><div className="recovery-stats"><Stat number={summary.assigned ?? 0} label="confirmed seats" /><Stat number={summary.reserved ?? 0} label="reserved" /><Stat number={summary.pendingOffers ?? 0} label="offers awaiting reply" /><Stat number={summary.queued ?? 0} label="still waitlisted" /></div><div className="steps">{['Decline recorded', 'Seat released', automatic ? 'Primary run finishes' : 'Organiser starts recovery', 'Waitlisted person called'].map((x,i) => <div key={x}><span>Step {i + 1}</span><b>{x}</b><p>{automatic ? ['A missing substitute releases the original reservation.', 'Rally keeps the seat available while primary RSVP calls are still running.', 'Once primary results are complete, Rally prepares recovery offers.', 'Sarvam calls the next consented waitlisted attendee.'][i] : ['A missing substitute releases the original reservation.', 'Rally keeps the seat available for the waitlist.', 'Choose Offer and call next attendees when you are ready.', 'Sarvam calls the next consented waitlisted attendee.'][i]}</p></div>)}</div>{error && <div className="error-banner">{error}</div>}{message && <div className="notice">{message}</div>}<div className="waitlist-note"><b>{automatic ? 'Automatic recovery is on' : 'Manual recovery is on'}</b><span>{automatic ? 'Rally waits for completed primary RSVP results before sending any waitlist recovery calls. A declined recovery offer moves the seat to the next eligible person.' : 'No waitlisted person is called when a seat is released. Use the button above when you want Rally to offer and call the next eligible people.'}</span></div><h3 className="section-title">Recovery queue</h3>{rows.length ? <div className="waitlist-table"><table><thead><tr><th>Rank</th><th>Attendee</th><th>Seat</th><th>Offer status</th><th>Call delivery</th><th>Expires</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.rank ?? '—'}</td><td><b>{row.name}</b><br/><span>{row.optedIn ? 'Phone contact consented' : 'No call consent'}</span></td><td>{row.seatNumber ? `Seat ${row.seatNumber}` : 'Waiting for release'}</td><td><Tag type={statusClass(displayStatus(row.status))}>{displayStatus(row.status)}</Tag></td><td>{row.callFailureReason ? <span className="delivery-failed">Needs retry</span> : row.callRequestedAt ? `Requested ${formatTime(row.callRequestedAt)}` : String(row.status).toUpperCase() === 'OFFERED' ? 'Queued for Sarvam' : 'Not called'}</td><td>{row.expiresAt ? formatDateTime(row.expiresAt) : '—'}</td></tr>)}</tbody></table></div> : <div className="sarvam-results-empty">There are no waitlisted attendees in this campaign.</div>}</section>
+  return <section><Header kicker="Waitlist recovery" title="Keep every released seat moving" description={automatic ? 'Rally offers released seats after the primary RSVP run settles; a queued Sarvam retry keeps the run open.' : 'Released seats remain under organiser control until you start recovery.'} action={<Button variant="secondary" onClick={recover} disabled={busy || !rows.length}>{busy ? 'Starting calls…' : 'Offer and call next attendees'}</Button>} /><div className="recovery-stats"><Stat number={`${summary.assigned ?? 0}/${summary.capacity ?? '—'}`} label="seats assigned" /><Stat number={summary.released ?? 0} label="released and available" /><Stat number={summary.pendingOffers ?? 0} label="offers awaiting reply" /><Stat number={summary.queued ?? 0} label="people in queue" /></div>{error && <div className="error-banner">{error}</div>}{message && <div className="notice">{message}</div>}<div className="waitlist-overview"><div><small>Recovery mode</small><b>{automatic ? 'Automatic after primary calls' : 'Manual organiser control'}</b><span>{automatic ? 'Rally will call the next eligible person once primary attendees are settled.' : 'Use the action above when you are ready to make waitlist offers.'}</span></div><div><small>Next eligible person</small><b>{nextCandidate ? `${nextCandidate.name} · rank ${nextCandidate.rank ?? '—'}` : 'No callable person in queue'}</b><span>{nextCandidate ? `Phone consented${nextCandidate.seatNumber ? ` · seat ${nextCandidate.seatNumber} offered` : ' · waiting for a released seat'}` : 'Check consent, phone numbers, or add a waitlisted attendee.'}</span></div><div><small>Released seats</small><b>{releasedSeats.length ? releasedSeats.map((seat) => `#${seat.seatNumber}`).join(', ') : 'None currently open'}</b><span>{releasedSeats.length ? 'Available for the next recovery offer.' : 'Seats return here when a confirmed attendee declines and releases one.'}</span></div></div><h3 className="section-title">Recovery queue</h3>{rows.length ? <div className="waitlist-table"><table><thead><tr><th>Rank</th><th>Attendee</th><th>Seat</th><th>Offer status</th><th>Call delivery</th><th>Expires</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.rank ?? '—'}</td><td><b>{row.name}</b><br/><span>{row.optedIn ? 'Phone contact consented' : 'No call consent'}</span></td><td>{row.seatNumber ? `Seat ${row.seatNumber}` : 'Waiting for release'}</td><td><Tag type={statusClass(displayStatus(row.status))}>{displayStatus(row.status)}</Tag></td><td>{row.callFailureReason ? <span className="delivery-failed">Needs retry</span> : row.callRequestedAt ? `Requested ${formatTime(row.callRequestedAt)}` : String(row.status).toUpperCase() === 'OFFERED' ? 'Queued for Sarvam' : 'Not called'}</td><td>{row.expiresAt ? formatDateTime(row.expiresAt) : '—'}</td></tr>)}</tbody></table></div> : <div className="sarvam-results-empty">There are no waitlisted attendees in this campaign.</div>}{offers.length > 0 && <><h3 className="section-title">Offer history</h3><div className="waitlist-table"><table><thead><tr><th>Attendee</th><th>Seat</th><th>Outcome</th><th>Call status</th><th>Created</th></tr></thead><tbody>{offers.slice(0, 10).map((offer) => <tr key={offer.id}><td><b>{offer.attendee?.name ?? 'Attendee'}</b></td><td>Seat {offer.seat?.seatNumber ?? '—'}</td><td><Tag type={statusClass(displayStatus(offer.status))}>{displayStatus(offer.status)}</Tag></td><td>{offer.callFailureReason ? <span className="delivery-failed">Needs retry</span> : offer.callRequestedAt ? `Requested ${formatTime(offer.callRequestedAt)}` : 'Not called'}</td><td>{formatDateTime(offer.createdAt)}</td></tr>)}</tbody></table></div></>}</section>
 }
 
 function Summary({ details }) {
@@ -649,9 +685,14 @@ function Summary({ details }) {
 }
 
 function Header({ kicker, title, description, action }) { return <header className="page-header"><div><small>{kicker}</small><h1>{title}</h1><p>{description}</p></div>{action}</header> }
+function ThemeToggle({ theme, onToggle, className = '' }) {
+  const isDark = theme === 'dark'
+  const destination = isDark ? 'light' : 'dark'
+  return <button type="button" className={'theme-toggle ' + className} onClick={onToggle} aria-pressed={isDark} aria-label={'Switch to ' + destination + ' mode'} title={'Switch to ' + destination + ' mode'}>{isDark ? <Sun size={16} /> : <Moon size={16} />}<span>{isDark ? 'Light' : 'Dark'}</span></button>
+}
 function PageLoader({ requests }) { return <div className="loading"><LoaderCircle className="spinner" size={28} /><strong>Connecting to Rally</strong><span>{requests[0]?.label ?? 'Loading campaign data…'}</span></div> }
-function DetailsLoader({ campaign, requests }) { return <section className="details-loader"><LoaderCircle className="spinner" size={30} /><h2>Loading {campaign.name}</h2><p>{requests.length ? requests.map((request) => request.label).join(' · ') : 'Preparing campaign operations…'}</p></section> }
-function ApiActivity({ requests }) { if (!requests.length) return null; return <aside className="api-activity" aria-live="polite"><div><LoaderCircle className="spinner" size={16} /><strong>Loading live data</strong></div>{requests.map((request) => <span key={request.id}>{request.label}</span>)}</aside> }
+function DetailsLoader({ campaign }) { return <section className="details-loader" aria-busy="true"><div className="loading-intro"><LoaderCircle className="spinner" size={22} /><small>Campaign operations</small><h2>Opening {campaign.name}</h2><p>Bringing together attendee readiness, call delivery, and waitlist recovery.</p></div><div className="operation-skeleton" aria-hidden="true"><i /><div><i /><i /><i /></div><div><i /><i /></div></div></section> }
+function ApiActivity({ requests }) { if (!requests.length) return null; const [current] = requests; const remaining = requests.length - 1; return <aside className="api-activity" aria-live="polite"><div><LoaderCircle className="spinner" size={16} /><strong>{current.label}</strong></div>{remaining > 0 && <span>Updating {remaining} more {remaining === 1 ? 'panel' : 'panels'}…</span>}</aside> }
 function Button({ children, icon: Icon, variant = 'primary', className = '', ...props }) { return <button className={`button ${variant} ${className}`.trim()} {...props}>{Icon && <Icon size={15} />}{children}</button> }
 function Tag({ children, type = 'neutral' }) { return <span className={`tag ${type}`}>{children}</span> }
 function Stat({ number, label }) { return <div className="stat"><b>{number}</b><span>{label}</span></div> }
